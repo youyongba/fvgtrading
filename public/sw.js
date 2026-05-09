@@ -3,7 +3,7 @@
  * - 任何 fetch 失败必须被捕获，绝不抛 unhandled rejection
  * - 改 CACHE 版本号即可强制清掉旧 SW 的缓存
  */
-const CACHE = 'fvg-shell-v8';
+const CACHE = 'fvg-shell-v9';
 const SHELL = [
   '/',
   '/dashboard',
@@ -62,9 +62,10 @@ self.addEventListener('fetch', (e) => {
   }
 
   // 静态：缓存命中优先；否则走网络；网络也失败 → 占位
+  // 增加 ignoreSearch: true，防止桌面快捷方式带参数导致缓存未命中
   e.respondWith(
     caches
-      .match(e.request)
+      .match(e.request, { ignoreSearch: true })
       .then((cached) => cached || safeFetch(e.request))
       .catch(() => safeFetch(e.request))
   );
