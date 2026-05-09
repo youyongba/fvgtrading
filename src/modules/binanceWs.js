@@ -57,8 +57,28 @@ const ctx = {
     closedAt: 0,
     attempts: 0,
     lastError: '',
+    // 最近一条原始消息样本（前 200 字符），用于排查解析问题
+    lastRawSample: '',
+    lastRawAt: 0,
+    rawMessages: 0,        // 收到的原始消息总数（含未识别）
+    parseErrors: 0,        // JSON 解析失败次数
+    unrecognized: 0,       // 解析成功但无 .p 字段
   },
+  // 最近 30 个 WS 事件（环形）
+  events: [],
 };
+
+const MAX_EVENTS = 30;
+function pushEvent(level, message) {
+  const ev = { ts: nowMs(), level, message };
+  ctx.events.push(ev);
+  if (ctx.events.length > MAX_EVENTS) ctx.events.shift();
+  // 同步打印到日志
+  if (level === 'error') logger.error(`[WS] ${message}`);
+  else if (level === 'warn') logger.warn(`[WS] ${message}`);
+  else if (level === 'ok') logger.ok(`[WS] ${message}`);
+  else logger.info(`[WS] ${message}`);
+}
 
 function readyStateText(ws) {
   if (!ws) return 'idle';
@@ -83,6 +103,7 @@ function getStatus() {
       ...ctx.wsState,
       readyState: readyStateText(ws),
     },
+    events: ctx.events.slice(-MAX_EVENTS),
     vwapNow:
       ctx.vwapArr.length > 0
         ? ctx.vwapArr[ctx.vwapArr.length - 1].vwap
@@ -106,12 +127,12 @@ function connect() {
   if (config.httpsProxy) {
     try {
       wsOpts.agent = new HttpsProxyAgent(config.httpsProxy);
-      logger.info(`WS connecting via proxy ${config.httpsProxy} → ${WS_URL}`);
+      pushEvent('info', `connecting via proxy ${config.httpsProxy} → ${WS_URL}`);
     } catch (e) {
-      logger.error(`HTTPS_PROXY 解析失败: ${e.message}`);
+      pushEvent('error', `HTTPS_PROXY 解析失败: ${e.message}`);
     }
   } else {
-    logger.info(`WS connecting → ${WS_URL}`);
+    pushEvent('info', `connecting → ${WS_URL} (attempt #${ctx.wsState.attempts})`);
   }
 
   ws = new WebSocket(WS_URL, wsOpts);
@@ -121,22 +142,44 @@ function connect() {
     ctx.wsState.connectedAt = nowMs();
     ctx.wsState.lastError = '';
     reconnectDelay = 1000;
-    logger.ok('WS connected');
+    pushEvent('ok', 'connected');
   });
 
   ws.on('message', (raw) => {
+    ctx.wsState.rawMessages += 1;
+    // 第一条与每 100 条采样一次，用于诊断
+    if (ctx.wsState.rawMessages === 1 || ctx.wsState.rawMessages % 100 === 0) {
+      const sample = String(raw).slice(0, 200);
+      ctx.wsState.lastRawSample = sample;
+      ctx.wsState.lastRawAt = nowMs();
+      pushEvent('info', `msg #${ctx.wsState.rawMessages}: ${sample}`);
+    }
+
     // 极速路径：尽量快、避免 throw
     let msg;
     try {
       msg = JSON.parse(raw);
-    } catch {
+    } catch (e) {
+      ctx.wsState.parseErrors += 1;
+      if (ctx.wsState.parseErrors <= 3) {
+        pushEvent('warn', `parse error: ${e.message} | raw=${String(raw).slice(0, 120)}`);
+      }
       return;
     }
     // 单流：直接是 markPriceUpdate 对象；combined：包了一层 { stream, data }
     const data = msg.data || msg;
-    if (!data || !data.p) return;
+    if (!data || data.p == null) {
+      ctx.wsState.unrecognized += 1;
+      if (ctx.wsState.unrecognized <= 3) {
+        pushEvent('warn', `unrecognized payload: ${JSON.stringify(msg).slice(0, 200)}`);
+      }
+      return;
+    }
     const price = parseFloat(data.p);
-    if (!Number.isFinite(price)) return;
+    if (!Number.isFinite(price)) {
+      pushEvent('warn', `invalid price field: ${data.p}`);
+      return;
+    }
     onPriceTick(price);
   });
 
@@ -144,14 +187,14 @@ function connect() {
     ctx.wsState.state = 'closed';
     ctx.wsState.closedAt = nowMs();
     const reasonStr = reason ? reason.toString() : '';
-    logger.warn(`WS closed code=${code} ${reasonStr}`);
+    pushEvent('warn', `closed code=${code} ${reasonStr}`);
     scheduleReconnect();
   });
 
   ws.on('error', (err) => {
     ctx.wsState.state = 'error';
     ctx.wsState.lastError = err.message;
-    logger.error('WS error:', err.message);
+    pushEvent('error', `error: ${err.message}`);
     try {
       ws.terminate();
     } catch (_) {
@@ -159,10 +202,12 @@ function connect() {
     }
   });
 
-  // 心跳：币安每 3 分钟发一次 ping，我们也主动 pong + 在 5 分钟没消息就强重连
+  // 心跳：币安每 3 分钟发一次 ping
   ws.on('ping', () => {
+    pushEvent('info', 'ping ← server, pong →');
     try { ws.pong(); } catch (_) { /* ignore */ }
   });
+  ws.on('pong', () => pushEvent('info', 'pong ← server'));
 }
 
 function scheduleReconnect() {
@@ -196,6 +241,11 @@ function onPriceTick(price) {
   ctx.lastPrice = price;
   ctx.lastTickAt = t0;
   ctx.stats.ticks += 1;
+
+  // 第一条 tick 与每 60 条采样一次（约 1 分钟一次）
+  if (ctx.stats.ticks === 1 || ctx.stats.ticks % 60 === 0) {
+    pushEvent('info', `tick #${ctx.stats.ticks} price=${price}`);
+  }
 
   const pos = ctx.position;
   if (pos) {

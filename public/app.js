@@ -13,6 +13,14 @@ const fmtPrice = (p) => (p == null ? '-' : Number(p).toLocaleString('en-US', {
   minimumFractionDigits: 2, maximumFractionDigits: 2,
 }));
 
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 async function fetchStatus() {
   const res = await fetch('/api/status').then(r => r.json());
   if (!res.ok) return;
@@ -42,6 +50,19 @@ async function fetchStatus() {
     wsHtml += `<div style="color:var(--yellow);font-size:11px;margin-top:4px;">已连接但未收到推送，等待 markPrice…</div>`;
   }
   $('#wsStatus').innerHTML = wsHtml;
+
+  // WS 事件日志
+  if ($('#wsEvents')) {
+    const events = (res.live.events || []).slice().reverse();
+    const colorMap = { ok: '#16d39a', warn: '#ffce5d', error: '#ff5c7a', info: '#8a93b8' };
+    $('#wsEvents').innerHTML = events.length
+      ? events.map(ev => `<div><span style="color:#5ea6ff">${fmtTs(ev.ts)}</span> <span style="color:${colorMap[ev.level] || '#8a93b8'}">[${ev.level}]</span> <span style="color:#e6ecff">${escapeHtml(ev.message)}</span></div>`).join('')
+      : '<div style="color:var(--muted)">暂无事件，点击启动后会出现连接日志…</div>';
+
+    $('#wsEventStats').innerText =
+      `原始消息=${w.rawMessages || 0}  解析失败=${w.parseErrors || 0}  ` +
+      `未识别=${w.unrecognized || 0}  最后采样: ${w.lastRawAt ? fmtTs(w.lastRawAt) : '-'}`;
+  }
 
   $('#lastPrice').innerText = fmtPrice(live.lastPrice);
   $('#lastTickAt').children[1].innerText = fmtTs(live.lastTickAt);
