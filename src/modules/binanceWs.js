@@ -372,10 +372,13 @@ async function refreshOnce() {
     if (!ctx.position) {
       const vwap = dataEngine.vwapAt(ctx.vwapArr, last[0]);
       const atr = dataEngine.atrAt(ctx.atrArr, last[0]);
+      // ★ lookback:1 让信号 K 线本身仍能触发"突破追多/空"
+      //   （否则 close 突破 C1 时 FVG 已被同根 close 判失效，导致信号永远扫不到）
       const activeFvgs = dataEngine.activeFvgsAt(
         ctx.fvgs,
         last[0],
-        ctx.k15
+        ctx.k15,
+        { lookback: 1 }
       );
       const sig = signalScanner.scanSignals({
         k15: last,
@@ -400,6 +403,9 @@ async function refreshOnce() {
           stopLossStruct: sig.stopLossStruct,
           atr,
           minStopPct: config.minStopLossPct,
+          maxRiskPct: config.maxRiskPerTrade,
+          positionSize: config.positionSize,
+          leverage: config.leverage,
         });
         // 立即开仓
         webhookExecutor.fireTradeWebhook({

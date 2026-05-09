@@ -268,39 +268,52 @@ function findFVGs(klines1h) {
 /**
  * 取在某 ts 时刻仍活跃的所有 FVG（按形成时间倒序）
  *
- * 失效判定基于"最新 15m K 线的实体收盘价"（与陷阱多/空判信号粒度一致）：
- *   - 看涨 FVG：最新 15m close < c1.low  → 当前失效
- *   - 看跌 FVG：最新 15m close > c1.high → 当前失效
+ * 失效判定基于 15m K 线的实体收盘价（与陷阱/突破信号判定粒度一致）：
+ *   - 看涨 FVG：评估锚点 close < c1.low  → 失效
+ *   - 看跌 FVG：评估锚点 close > c1.high → 失效
  *
- * 与 SMC 实战完全对齐：
- *   - 15m 实体在 FVG 一侧（看跌 FVG 下方 / 看涨 FVG 上方）→ 活跃
- *   - 15m 影线刺穿 + 实体收回 → 仍活跃 + 同时触发陷阱信号 ✅
- *   - 15m 实体收盘越过 C1 关键点 → 暂时失效（下一根 15m 又跌回会重新激活）
+ * lookback 参数解决"信号 K 线本身突破 C1 关键点"的判定矛盾：
+ *   - lookback = 0（默认 / dashboard 显示用）：评估锚点 = 最新 15m K 线
+ *     → 当前 close 在哪一侧就显示哪一侧的状态，更直观
+ *   - lookback = 1（信号扫描用）：评估锚点 = 信号 K 线的"上一根"
+ *     → 这样"突破追多"在 close > c1.high 的当根仍能触发
+ *       （上一根 close 还在 FVG 下方 → FVG 仍在 active 列表）
+ *     → 下一根再扫时，上一根（即触发那根）close > c1.high → FVG 才被标记失效
+ *
+ * 行为对照（看跌 FVG 为例，看涨 FVG 镜像）：
+ *   场景                       上一根  当前根   FVG活跃?       可触发
+ *   ─────────────────────────────────────────────────────────────
+ *   陷阱空                     <c1.h   <c1.h    是             陷阱空
+ *   突破追多                   <c1.h   >c1.h    是 (lookback)  突破追多
+ *   已突破后再扫               >c1.h   任何     否             不参与
  *
  * @param {object} fvgs           { bullish, bearish }
  * @param {number} ts             评估时刻（通常是当前 15m K 线的起始 ts）
- * @param {Array}  klines15m      15m K 线数组（必须传入，用于失效判定）
+ * @param {Array}  klines15m      15m K 线数组
+ * @param {object} [options]
+ * @param {number} [options.lookback=0]  失效判定时往前回退几根 15m K 线
  */
-function activeFvgsAt(fvgs, ts, klines15m) {
-  // 找到 ts 时刻最新已知的 15m K 线
-  // 调用时机通常是 K 线收盘瞬间，传入的 ts 等于某根 K 线的起始时间，
-  // 此时这根 K 线的 close 已知 → 用它来判定 FVG 失效
-  let last15m = null;
+function activeFvgsAt(fvgs, ts, klines15m, options = {}) {
+  const { lookback = 0 } = options;
+  // 找到 ts 时刻最新已知的 15m K 线下标
+  let foundIdx = -1;
   for (let i = klines15m.length - 1; i >= 0; i--) {
     if (klines15m[i][0] <= ts) {
-      last15m = klines15m[i];
+      foundIdx = i;
       break;
     }
   }
-  const lastClose = last15m ? last15m[4] : null;
+  const anchorIdx = foundIdx - lookback;
+  const anchor = anchorIdx >= 0 ? klines15m[anchorIdx] : null;
+  const anchorClose = anchor ? anchor[4] : null;
 
   const isInvalidated = (fvg) => {
-    if (lastClose == null) return false;
-    // FVG 必须在最新 15m K 线之前完全形成（C3 收盘 ≤ 最新 15m K 线收盘）
+    if (anchorClose == null) return false;
+    // FVG 必须在评估锚点 K 线收盘之前完全形成
     const c3CloseTs = fvg.tsC1 + 3 * 60 * 60 * 1000; // C3 收盘 = C1 起始 + 3h
-    if (last15m[0] + 15 * 60 * 1000 < c3CloseTs) return false;
-    if (fvg.type === 'bull' && lastClose < fvg.c1Low) return true;
-    if (fvg.type === 'bear' && lastClose > fvg.c1High) return true;
+    if (anchor[0] + 15 * 60 * 1000 < c3CloseTs) return false;
+    if (fvg.type === 'bull' && anchorClose < fvg.c1Low) return true;
+    if (fvg.type === 'bear' && anchorClose > fvg.c1High) return true;
     return false;
   };
 

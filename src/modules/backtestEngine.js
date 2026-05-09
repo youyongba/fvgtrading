@@ -313,7 +313,8 @@ async function runBacktest(taskId, opts) {
     if (!position) {
       const vwap = dataEngine.vwapAt(vwapArr, ts);
       const atr = dataEngine.atrAt(atrArr, ts);
-      const activeFvgs = dataEngine.activeFvgsAt(fvgs, ts, k15);
+      // ★ lookback:1 让信号 K 线本身仍能触发"突破追多/空"（详见 dataEngine 注释）
+      const activeFvgs = dataEngine.activeFvgsAt(fvgs, ts, k15, { lookback: 1 });
       const sig = signalScanner.scanSignals({
         k15: bar,
         vwap,
@@ -334,6 +335,9 @@ async function runBacktest(taskId, opts) {
             stopLossStruct: sig.stopLossStruct,
             atr,
             minStopPct: config.minStopLossPct,
+            maxRiskPct: config.maxRiskPerTrade,
+            positionSize: config.positionSize,
+            leverage: config.leverage,
           });
           if (tp && Number.isFinite(sl)) {
             risk.openPosition(sig.direction, ts);

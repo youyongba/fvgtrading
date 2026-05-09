@@ -70,13 +70,14 @@ function scanSignals(ctx) {
       });
     }
     // 3) 突破追多：实体站上看跌 FVG 的 C1 最高点
+    //    注意：仅要求 close > c1.high；不强制 open <= c1.high（gap up 也算）
     for (const f of activeFvgs.bearish) {
-      if (open <= f.c1High && close > f.c1High) {
+      if (close > f.c1High) {
         return signal({
           name: '突破追多',
           direction: 'long',
           entry: close,
-          stopLossStruct: f.c1High - (close - f.c1High), // 用突破点下方作结构止损
+          stopLossStruct: low, // 突破 K 线最低点：跌穿 = 突破失败
           fvg: f,
           vwap,
           ts,
@@ -116,14 +117,15 @@ function scanSignals(ctx) {
         reason: '15m实体跌回1H VWAP下方',
       });
     }
-    // 6) 突破追空
+    // 6) 突破追空：实体跌破看涨 FVG 的 C1 最低点
+    //    注意：仅要求 close < c1.low；不强制 open >= c1.low（gap down 也算）
     for (const f of activeFvgs.bullish) {
-      if (open >= f.c1Low && close < f.c1Low) {
+      if (close < f.c1Low) {
         return signal({
           name: '突破追空',
           direction: 'short',
           entry: close,
-          stopLossStruct: f.c1Low + (f.c1Low - close),
+          stopLossStruct: high, // 突破 K 线最高点：突上 = 突破失败
           fvg: f,
           vwap,
           ts,
@@ -182,12 +184,40 @@ function computeTakeProfit({ direction, entry, vwap, activeFvgs }) {
 
 /**
  * 计算最终止损价
- *  1) 结构止损 vs 1.5×ATR：取较近者（按用户初始需求）
- *  2) 若最终距离 < minStopPct% × entry，则放宽到 minStopPct
- *     —— 防止 SMC 紧止损被微小波动直接打掉，可在 .env 设 MIN_STOP_LOSS_PCT=0 关闭
+ *  1) 结构止损 vs 1.5×ATR：取较近者（按规范 6.5）
+ *  2) 单笔风险硬上限：止损距离 ≤ MAX_RISK_PER_TRADE / (POSITION_SIZE × LEVERAGE) × entry
+ *     —— 保证"单笔亏损 ≤ 本金 maxRiskPerTrade%"（规范 6.5 最后一条）
+ *  3) 若最终距离 < minStopPct% × entry，则放宽到 minStopPct
+ *     —— 防止 SMC 紧止损被微小波动直接打掉
+ *
+ * 三道闸的作用顺序：
+ *   - 结构止损 → 上界限到 1.5×ATR → 上界再限到"风险硬上限" → 下界放宽到 minStopPct
+ *   - 当 minStopPct% × positionSize × leverage / 100 > maxRiskPerTrade%（参数冲突）时，
+ *     为保证用户的"最小止损距离"意图不被覆盖，minStopPct 优先级高于风险硬上限。
+ *
+ * @param {object} p
+ * @param {'long'|'short'} p.direction
+ * @param {number} p.entry            入场价
+ * @param {number} p.stopLossStruct   结构止损价
+ * @param {number} p.atr              1H ATR(14)
+ * @param {number} [p.minStopPct=0]   最小止损距离百分比
+ * @param {number} [p.maxRiskPct=0]   单笔最大本金亏损百分比（默认 0 = 不启用硬上限）
+ * @param {number} [p.positionSize=0] 仓位百分比
+ * @param {number} [p.leverage=1]     杠杆倍数
  */
-function computeStopLoss({ direction, entry, stopLossStruct, atr, minStopPct = 0 }) {
+function computeStopLoss({
+  direction,
+  entry,
+  stopLossStruct,
+  atr,
+  minStopPct = 0,
+  maxRiskPct = 0,
+  positionSize = 0,
+  leverage = 1,
+}) {
   let sl = stopLossStruct;
+
+  // (1) 1.5×ATR 限幅（结构止损过远时收紧到 1.5×ATR）
   if (atr && Number.isFinite(atr)) {
     const atrCap = atr * 1.5;
     const dist = Math.abs(entry - stopLossStruct);
@@ -195,7 +225,18 @@ function computeStopLoss({ direction, entry, stopLossStruct, atr, minStopPct = 0
       sl = direction === 'long' ? entry - atrCap : entry + atrCap;
     }
   }
-  // 最小止损距离保护
+
+  // (2) 单笔风险硬上限：止损价格距离 ≤ maxRiskPct / (positionSize × leverage) × entry
+  if (maxRiskPct > 0 && positionSize > 0 && leverage > 0) {
+    const maxDistPct = maxRiskPct / (positionSize * leverage); // 价格波动百分比上限
+    const maxDist = entry * maxDistPct;
+    const curDist = Math.abs(entry - sl);
+    if (curDist > maxDist) {
+      sl = direction === 'long' ? entry - maxDist : entry + maxDist;
+    }
+  }
+
+  // (3) 最小止损距离保护（最后兜底，防止过紧）
   if (minStopPct > 0) {
     const minDist = entry * (minStopPct / 100);
     const curDist = Math.abs(entry - sl);
