@@ -286,8 +286,12 @@ function activeFvgsAt(fvgs, ts, klines1h) {
     for (const k of klines1h) {
       // 跳过 C1 自身及更早的 K 线；C1 之后的才能让 FVG 失效
       // C3 之前的 K 线（即 C1 ~ C2）不应让 FVG 失效（FVG 还没成形）
+      // 注意：C3 是第三根 K 线，C1 和 C3 之间隔着 C2。
+      // C3 的开盘时间就是 fvg.tsC1 + 2 小时。只有在 C3 "收盘" 之后，也就是
+      // k[0] > c3Ts，这根 K 线才有资格使 FVG 失效。
       const c3Ts = fvg.tsC1 + 2 * 60 * 60 * 1000; // 1H K 线，C3 = C1 + 2 根
       if (k[0] <= c3Ts) continue;
+      // 传入的 ts 是 15m K 线的起始时间，只考察在这根 15m K 线*之前*已经收盘的 1H K 线
       if (k[0] > ts) break;
       const close = k[4];
       if (fvg.type === 'bull' && close < fvg.c1Low) return true;
