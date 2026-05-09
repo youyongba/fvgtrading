@@ -22,6 +22,27 @@ async function fetchStatus() {
   $('#systemStatus').innerHTML = dot + (live.running ? '运行中' : '未运行');
   $('#systemStatus').className = 'metric ' + (live.running ? 'pos' : 'muted');
 
+  // WebSocket 状态徽章
+  const w = live.ws || {};
+  const stateLabel = {
+    idle: '未连接', connecting: '连接中…', open: 'WS 已连接',
+    closing: '关闭中', closed: 'WS 已断开', error: 'WS 错误',
+  }[w.readyState || w.state] || (w.readyState || w.state || '-');
+  const stateColor = {
+    open: 'green', connecting: 'yellow',
+    closed: 'red', error: 'red', idle: '',
+  }[w.readyState || w.state] || '';
+  let wsHtml = `<span class="badge ${stateColor}">${stateLabel}</span>`;
+  if (w.attempts > 1 && w.readyState !== 'open') wsHtml += ` <span class="badge">重连第 ${w.attempts} 次</span>`;
+  if (w.proxy) wsHtml += ` <span class="badge blue">代理</span>`;
+  if (w.lastError && w.readyState !== 'open') {
+    wsHtml += `<div style="color:var(--red);font-size:11px;margin-top:4px;">${w.lastError}</div>`;
+  }
+  if (live.running && w.readyState === 'open' && (live.stats?.ticks || 0) === 0) {
+    wsHtml += `<div style="color:var(--yellow);font-size:11px;margin-top:4px;">已连接但未收到推送，等待 markPrice…</div>`;
+  }
+  $('#wsStatus').innerHTML = wsHtml;
+
   $('#lastPrice').innerText = fmtPrice(live.lastPrice);
   $('#lastTickAt').children[1].innerText = fmtTs(live.lastTickAt);
   $('#lastDecisionMs').innerText = (live.stats?.lastDecisionMs ?? 0) + ' ms';

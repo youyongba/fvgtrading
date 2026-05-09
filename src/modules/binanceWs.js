@@ -15,6 +15,7 @@
  * 自动重连：指数退避（1s → 2s → 5s → 10s → 30s 上限）
  */
 const WebSocket = require('ws');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const config = require('../config');
 const logger = require('../utils/logger');
 const dataEngine = require('./dataEngine');
@@ -28,6 +29,9 @@ let reconnectDelay = 1000;
 const MAX_DELAY = 30000;
 let running = false;
 
+// 单流形式更稳；combined 形式偶发 GFW 阻断更明显
+const WS_URL = `${config.binanceWsBase.replace(/\/+$/, '')}/btcusdt@markPrice@1s`;
+
 // === 实时上下文 ===
 const ctx = {
   lastPrice: null,
@@ -35,16 +39,37 @@ const ctx = {
   vwapArr: [],
   atrArr: [],
   fvgs: { bullish: [], bearish: [] },
-  k15: [], // 最近的 15m K 线
-  k1h: [], // 最近的 1H K 线
-  position: null, // { direction, entry, tp, sl, signal, note, openedAt }
+  k15: [],
+  k1h: [],
+  position: null,
   // 状态摘要（暴露给 /api/status）
   stats: {
     startedAt: null,
     ticks: 0,
     lastDecisionMs: 0,
   },
+  // WS 健康状态
+  wsState: {
+    state: 'idle', // idle | connecting | open | closed | error
+    url: WS_URL,
+    proxy: config.httpsProxy || '',
+    connectedAt: 0,
+    closedAt: 0,
+    attempts: 0,
+    lastError: '',
+  },
 };
+
+function readyStateText(ws) {
+  if (!ws) return 'idle';
+  switch (ws.readyState) {
+    case WebSocket.CONNECTING: return 'connecting';
+    case WebSocket.OPEN: return 'open';
+    case WebSocket.CLOSING: return 'closing';
+    case WebSocket.CLOSED: return 'closed';
+    default: return 'unknown';
+  }
+}
 
 function getStatus() {
   return {
@@ -54,6 +79,10 @@ function getStatus() {
     position: ctx.position,
     risk: liveRisk.snapshot(),
     stats: ctx.stats,
+    ws: {
+      ...ctx.wsState,
+      readyState: readyStateText(ws),
+    },
     vwapNow:
       ctx.vwapArr.length > 0
         ? ctx.vwapArr[ctx.vwapArr.length - 1].vwap
@@ -67,18 +96,32 @@ function getStatus() {
 
 /**
  * 连接 WebSocket
+ *  - 若 .env 配置了 HTTPS_PROXY，自动走代理（解决国内 GFW 干扰长连接）
  */
 function connect() {
   if (!running) return;
-  const url = config.binanceWsCombined;
-  logger.info(`WS connecting → ${url}`);
-  ws = new WebSocket(url, {
-    handshakeTimeout: config.binanceWsHandshakeMs,
-  });
+  ctx.wsState.state = 'connecting';
+  ctx.wsState.attempts += 1;
+  const wsOpts = { handshakeTimeout: config.binanceWsHandshakeMs };
+  if (config.httpsProxy) {
+    try {
+      wsOpts.agent = new HttpsProxyAgent(config.httpsProxy);
+      logger.info(`WS connecting via proxy ${config.httpsProxy} → ${WS_URL}`);
+    } catch (e) {
+      logger.error(`HTTPS_PROXY 解析失败: ${e.message}`);
+    }
+  } else {
+    logger.info(`WS connecting → ${WS_URL}`);
+  }
+
+  ws = new WebSocket(WS_URL, wsOpts);
 
   ws.on('open', () => {
-    logger.ok('WS connected');
+    ctx.wsState.state = 'open';
+    ctx.wsState.connectedAt = nowMs();
+    ctx.wsState.lastError = '';
     reconnectDelay = 1000;
+    logger.ok('WS connected');
   });
 
   ws.on('message', (raw) => {
@@ -89,6 +132,7 @@ function connect() {
     } catch {
       return;
     }
+    // 单流：直接是 markPriceUpdate 对象；combined：包了一层 { stream, data }
     const data = msg.data || msg;
     if (!data || !data.p) return;
     const price = parseFloat(data.p);
@@ -96,12 +140,17 @@ function connect() {
     onPriceTick(price);
   });
 
-  ws.on('close', (code) => {
-    logger.warn(`WS closed code=${code}`);
+  ws.on('close', (code, reason) => {
+    ctx.wsState.state = 'closed';
+    ctx.wsState.closedAt = nowMs();
+    const reasonStr = reason ? reason.toString() : '';
+    logger.warn(`WS closed code=${code} ${reasonStr}`);
     scheduleReconnect();
   });
 
   ws.on('error', (err) => {
+    ctx.wsState.state = 'error';
+    ctx.wsState.lastError = err.message;
     logger.error('WS error:', err.message);
     try {
       ws.terminate();
@@ -109,12 +158,32 @@ function connect() {
       /* ignore */
     }
   });
+
+  // 心跳：币安每 3 分钟发一次 ping，我们也主动 pong + 在 5 分钟没消息就强重连
+  ws.on('ping', () => {
+    try { ws.pong(); } catch (_) { /* ignore */ }
+  });
 }
 
 function scheduleReconnect() {
   if (!running) return;
   setTimeout(connect, reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_DELAY);
+}
+
+/**
+ * 静默连接看门狗：每 30 秒检查一次，
+ * 若 WS 已经 OPEN 但 60 秒没收到任何消息，主动断开触发重连。
+ */
+function startWatchdog() {
+  setInterval(() => {
+    if (!running || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const idle = nowMs() - (ctx.lastTickAt || ctx.wsState.connectedAt || 0);
+    if (idle > 60_000) {
+      logger.warn(`WS 静默 ${Math.round(idle / 1000)}s，强制重连`);
+      try { ws.terminate(); } catch (_) { /* ignore */ }
+    }
+  }, 30_000).unref?.();
 }
 
 /**
@@ -267,16 +336,10 @@ function start() {
   ctx.stats.startedAt = nowMs();
   ctx.stats.startedDay = startOfDayCN(nowMs());
   liveRisk.reset();
-  refreshOnce()
-    .catch((e) =>
-      logger.error(
-        `初始指标刷新失败（不影响 WS 接入，将在后台持续重试）: ${e.message}`
-      )
-    )
-    .finally(() => {
-      connect();
-      refreshIndicatorsLoop();
-    });
+  // ★ 关键：立即启动 WS，不等 ccxt 拉 K 线（避免 REST 慢拖累实时数据）
+  connect();
+  startWatchdog();
+  refreshIndicatorsLoop();
 }
 
 function stop() {
