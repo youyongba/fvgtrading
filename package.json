@@ -1,0 +1,24 @@
+{
+  "name": "fvgtrading",
+  "version": "1.0.0",
+  "description": "BTC/USDT 永续合约 FVG 自动化量化交易系统（实盘 + 回测）",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "backtest": "node src/scripts/runBacktest.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "better-sqlite3": "^11.3.0",
+    "ccxt": "^4.4.20",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}

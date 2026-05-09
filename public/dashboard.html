@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FVG 实盘监控</title>
+<meta name="theme-color" content="#0b1020" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="FVGTrade" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="appbar">
+  <h1>FVG · 实盘监控</h1>
+  <nav class="nav">
+    <a href="/" class="active">实盘</a>
+    <a href="/backtest">回测</a>
+  </nav>
+</header>
+
+<main class="container">
+  <div class="row cols-3">
+    <div class="card">
+      <h3>系统状态</h3>
+      <div id="systemStatus" class="metric muted"><span class="dot off"></span>未运行</div>
+      <div class="flex" style="margin-top:10px;">
+        <button id="btnStart" class="btn success">启动</button>
+        <button id="btnStop"  class="btn danger">停止</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>最新价（mark price）</h3>
+      <div id="lastPrice" class="metric">-</div>
+      <div id="lastTickAt" class="kv"><span class="k">tick 时间</span><span>-</span></div>
+    </div>
+    <div class="card">
+      <h3>决策耗时（最近）</h3>
+      <div id="lastDecisionMs" class="metric">- ms</div>
+      <div class="kv"><span class="k">tick 数</span><span id="tickCount">0</span></div>
+    </div>
+  </div>
+
+  <div class="row cols-2" style="margin-top:12px;">
+    <div class="card">
+      <h3>当前持仓</h3>
+      <div id="position">空仓</div>
+    </div>
+    <div class="card">
+      <h3>风控状态</h3>
+      <div id="risk"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h3>最近交易</h3>
+    <div class="scroll-x">
+      <table class="table" id="tradesTable">
+        <thead>
+          <tr><th>时间</th><th>动作</th><th>方向</th><th>信号</th><th>价格</th><th>触发</th><th>备注</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h3>配置</h3>
+    <div id="config" class="row cols-3"></div>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>

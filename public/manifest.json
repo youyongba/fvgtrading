@@ -1,0 +1,20 @@
+{
+  "name": "FVG 量化交易系统",
+  "short_name": "FVGTrade",
+  "description": "BTC/USDT 永续合约 FVG 自动化交易（实盘 + 回测）",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
