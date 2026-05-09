@@ -176,5 +176,12 @@ function pollTask(id) {
 }
 
 $('#btnStart').addEventListener('click', startBacktest);
-loadTasks();
+loadTasks().then(() => {
+  // Hide splash screen after first data load
+  const splash = document.getElementById('splash-screen');
+  if (splash) {
+    splash.classList.add('hidden');
+    setTimeout(() => splash.remove(), 400);
+  }
+});
 setInterval(loadTasks, 5000);

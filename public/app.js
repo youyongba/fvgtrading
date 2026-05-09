@@ -174,5 +174,12 @@ $('#btnStop').addEventListener('click', async () => {
 
 setInterval(fetchStatus, 1000);
 setInterval(fetchTrades, 5000);
-fetchStatus();
+fetchStatus().then(() => {
+  // Hide splash screen after first data load
+  const splash = document.getElementById('splash-screen');
+  if (splash) {
+    splash.classList.add('hidden');
+    setTimeout(() => splash.remove(), 400);
+  }
+});
 fetchTrades();
