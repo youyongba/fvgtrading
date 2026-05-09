@@ -3,7 +3,7 @@
  * - 任何 fetch 失败必须被捕获，绝不抛 unhandled rejection
  * - 改 CACHE 版本号即可强制清掉旧 SW 的缓存
  */
-const CACHE = 'fvg-shell-v6';
+const CACHE = 'fvg-shell-v7';
 const SHELL = [
   '/',
   '/dashboard',

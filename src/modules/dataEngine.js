@@ -218,15 +218,17 @@ function atrAt(atrArr, ts) {
 /**
  * FVG 识别（基于 1H K 线）
  * 返回每个 FVG 携带：
- *   { type: 'bull'|'bear', tsC1, c1Low, c1High, c3Low, c3High, gapLow, gapHigh, filled }
- * filled 表示是否被后续 K 线完全填补（用于回测时减少候选）
+ *   { type: 'bull'|'bear', tsC1, c1Low, c1High, c3Low, c3High, gapLow, gapHigh }
  *
  * 看涨 FVG: c1.high < c3.low
  *   缺口区间: [c1.high, c3.low]
- *   被填补判断: 后续某根 K 线 close <= c1.high
+ *   失效判断（与 signalScanner 的陷阱多对齐）:
+ *     1H 收盘价"完全跌破 C1 最低点"才视为失效（close < c1.low）
+ *     —— 价格只是刺穿 C1 最低或回到缺口内并不算失效，否则陷阱信号永远触发不了
+ *
  * 看跌 FVG: c1.low  > c3.high
  *   缺口区间: [c3.high, c1.low]
- *   被填补判断: 后续某根 K 线 close >= c1.low
+ *   失效判断: 1H 收盘价完全升破 C1 最高点（close > c1.high）
  */
 function findFVGs(klines1h) {
   const bullish = [];
@@ -264,25 +266,38 @@ function findFVGs(klines1h) {
 }
 
 /**
- * 取在某 ts 之前形成、且尚未被填补的所有 FVG（按形成时间倒序）
+ * 取在某 ts 之前形成、且尚未失效的所有 FVG（按形成时间倒序）
+ *
+ * 失效判定（与陷阱多/空触发逻辑保持一致）：
+ *   - 看涨 FVG：某根后续 1H K 线 close < c1Low → 失效（彻底跌破 C1 最低点）
+ *   - 看跌 FVG：某根后续 1H K 线 close > c1High → 失效（彻底升破 C1 最高点）
+ *
+ * 如此定义后：
+ *   - 价格回到缺口内 → FVG 仍活跃，等待"陷阱"机会
+ *   - 价格影线刺穿 C1 关键点但收盘站回 → FVG 仍活跃，正是信号触发场景
+ *   - 价格收盘完全突破 C1 关键点 → FVG 真正失效
+ *
  * @param {object} fvgs {bullish,bearish}
  * @param {number} ts
- * @param {Array} klines1h 用于判断"是否已被填补"
+ * @param {Array} klines1h 用于判断是否已失效（仅看 ts 之前已收盘的 K 线）
  */
 function activeFvgsAt(fvgs, ts, klines1h) {
-  const isFilled = (fvg) => {
+  const isInvalidated = (fvg) => {
     for (const k of klines1h) {
-      if (k[0] <= fvg.tsC1) continue;
+      // 跳过 C1 自身及更早的 K 线；C1 之后的才能让 FVG 失效
+      // C3 之前的 K 线（即 C1 ~ C2）不应让 FVG 失效（FVG 还没成形）
+      const c3Ts = fvg.tsC1 + 2 * 60 * 60 * 1000; // 1H K 线，C3 = C1 + 2 根
+      if (k[0] <= c3Ts) continue;
       if (k[0] > ts) break;
       const close = k[4];
-      if (fvg.type === 'bull' && close <= fvg.c1High) return true;
-      if (fvg.type === 'bear' && close >= fvg.c1Low) return true;
+      if (fvg.type === 'bull' && close < fvg.c1Low) return true;
+      if (fvg.type === 'bear' && close > fvg.c1High) return true;
     }
     return false;
   };
   const filterAlive = (arr) =>
     arr
-      .filter((f) => f.tsC1 < ts && !isFilled(f))
+      .filter((f) => f.tsC1 < ts && !isInvalidated(f))
       .sort((a, b) => b.tsC1 - a.tsC1);
   return {
     bullish: filterAlive(fvgs.bullish),
