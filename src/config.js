@@ -15,12 +15,13 @@ const config = {
   // 币安 WebSocket
   binanceWsBase: process.env.BINANCE_WS_BASE || 'wss://fstream.binance.com/ws',
   binanceWsHandshakeMs: num(process.env.BINANCE_WS_HANDSHAKE_MS, 20000),
-  // 实际订阅地址：默认 /market/stream（用户实测此路径推送稳定）
+  // 实际订阅地址：默认 /market/ws/<name> 单流形式
+  // 备用：wss://fstream.binance.com/market/stream?streams=btcusdt@markPrice@1s
   // 备用：wss://fstream.binance.com/stream?streams=btcusdt@markPrice@1s
-  // 备用：wss://fstream.binance.com/ws/btcusdt@markPrice@1s （部分机房只握手不推数据）
+  // 备用：wss://fstream.binance.com/ws/btcusdt@markPrice@1s
   binanceWsUrl:
     process.env.BINANCE_WS_URL ||
-    'wss://fstream.binance.com/market/stream?streams=btcusdt@markPrice@1s',
+    'wss://fstream.binance.com/market/ws/btcusdt@markPrice@1s',
 
   // 交易 Webhook
   webhookUrl:
