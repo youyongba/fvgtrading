@@ -67,6 +67,10 @@ const ctx = {
   },
   // 最近 30 个 WS 事件（环形）
   events: [],
+  // 已被信号"测试过"的 FVG（key = dataEngine.fvgKey(f)）
+  // 一旦某 FVG 触发了任意陷阱/突破信号，就加入此集合，
+  // 之后不再参与信号扫描，也不在 dashboard 显示。
+  testedFvgs: new Set(),
 };
 
 const MAX_EVENTS = 30;
@@ -102,7 +106,9 @@ function activeFvgsForDashboard(limit = 5) {
   const last15m = ctx.k15.length > 0 ? ctx.k15[ctx.k15.length - 1] : null;
   const refTs = last15m ? last15m[0] : nowMs();
   const refPrice = ctx.lastPrice ?? (last15m ? last15m[4] : null);
-  const active = dataEngine.activeFvgsAt(ctx.fvgs, refTs, ctx.k15);
+  const active = dataEngine.activeFvgsAt(ctx.fvgs, refTs, ctx.k15, {
+    excludeKeys: ctx.testedFvgs,
+  });
 
   const decorate = (f) => {
     const distKey = f.type === 'bull' ? f.c1Low : f.c1High;
@@ -159,6 +165,7 @@ function getStatus() {
         ? ctx.atrArr[ctx.atrArr.length - 1].atr
         : null,
     fvgs: activeFvgsForDashboard(5),
+    testedFvgsCount: ctx.testedFvgs.size,
   };
 }
 
@@ -373,8 +380,10 @@ async function refreshOnce() {
       const vwap = dataEngine.vwapAt(ctx.vwapArr, last[0]);
       const atr = dataEngine.atrAt(ctx.atrArr, last[0]);
       // ★ 信号扫描必须用 formedFvgsAt（不做 close 失效过滤）
-      //   否则"先突破后反转跌回"的经典陷阱空场景会被 FVG 失效逻辑过滤掉
-      const formedFvgs = dataEngine.formedFvgsAt(ctx.fvgs, last[0]);
+      //   并排除已被信号"测试过"的 FVG（一次成型只能触发一次）
+      const formedFvgs = dataEngine.formedFvgsAt(ctx.fvgs, last[0], {
+        excludeKeys: ctx.testedFvgs,
+      });
       const prevClose =
         ctx.k15.length >= 2 ? ctx.k15[ctx.k15.length - 2][4] : null;
       const sig = signalScanner.scanSignals({
@@ -384,6 +393,10 @@ async function refreshOnce() {
         activeFvgs: formedFvgs,
       });
       if (sig) {
+        // ★ 不论风控结果，FVG 已经被这根 K 线"测试"过 → 标记，后续不再参与
+        if (sig.fvg) {
+          ctx.testedFvgs.add(dataEngine.fvgKey(sig.fvg));
+        }
         const can = liveRisk.canOpen(sig.direction, now);
         if (!can.ok) {
           logger.warn(`信号丢弃：${can.reason} | ${sig.name}`);

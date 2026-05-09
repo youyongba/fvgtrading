@@ -199,6 +199,8 @@ async function runBacktest(taskId, opts) {
   let position = null; // { direction, entry, tp, sl, qty, signal, openedAt, openIndex, note }
   const trades = [];
   const equityCurve = [];
+  // 已被信号"测试过"的 FVG（一次成型只触发一次）
+  const testedFvgs = new Set();
 
   const insTrade = db.prepare(
     `INSERT INTO backtest_trades
@@ -314,8 +316,10 @@ async function runBacktest(taskId, opts) {
       const vwap = dataEngine.vwapAt(vwapArr, ts);
       const atr = dataEngine.atrAt(atrArr, ts);
       // ★ 信号扫描必须用 formedFvgsAt（不做 close 失效过滤）
-      //   否则"先突破后反转跌回"的经典陷阱空场景会被 FVG 失效逻辑过滤掉
-      const formedFvgs = dataEngine.formedFvgsAt(fvgs, ts);
+      //   并排除已被信号"测试过"的 FVG（一次成型只能触发一次）
+      const formedFvgs = dataEngine.formedFvgsAt(fvgs, ts, {
+        excludeKeys: testedFvgs,
+      });
       const prevClose = i > 0 ? k15[i - 1][4] : null;
       const sig = signalScanner.scanSignals({
         k15: bar,
@@ -324,6 +328,10 @@ async function runBacktest(taskId, opts) {
         activeFvgs: formedFvgs,
       });
       if (sig) {
+        // ★ 不论风控结果，FVG 已被这根 K 线"测试"过 → 标记，后续不再参与
+        if (sig.fvg) {
+          testedFvgs.add(dataEngine.fvgKey(sig.fvg));
+        }
         const can = risk.canOpen(sig.direction, ts);
         if (can.ok) {
           const tp = signalScanner.computeTakeProfit({

@@ -292,9 +292,10 @@ function findFVGs(klines1h) {
  * @param {Array}  klines15m      15m K 线数组
  * @param {object} [options]
  * @param {number} [options.lookback=0]  失效判定时往前回退几根 15m K 线
+ * @param {Set<string>} [options.excludeKeys]  已测试过 / 需要排除的 FVG key（fvgKey 生成）
  */
 function activeFvgsAt(fvgs, ts, klines15m, options = {}) {
-  const { lookback = 0 } = options;
+  const { lookback = 0, excludeKeys } = options;
   // 找到 ts 时刻最新已知的 15m K 线下标
   let foundIdx = -1;
   for (let i = klines15m.length - 1; i >= 0; i--) {
@@ -320,11 +321,20 @@ function activeFvgsAt(fvgs, ts, klines15m, options = {}) {
   const filterAlive = (arr) =>
     arr
       .filter((f) => f.tsC1 < ts && !isInvalidated(f))
+      .filter((f) => !excludeKeys || !excludeKeys.has(fvgKey(f)))
       .sort((a, b) => b.tsC1 - a.tsC1);
   return {
     bullish: filterAlive(fvgs.bullish),
     bearish: filterAlive(fvgs.bearish),
   };
+}
+
+/**
+ * FVG 的唯一标识（用于"已测试 FVG"集合的 key）
+ * 格式：bull@<tsC1>  /  bear@<tsC1>
+ */
+function fvgKey(fvg) {
+  return `${fvg.type}@${fvg.tsC1}`;
 }
 
 /**
@@ -345,12 +355,19 @@ function activeFvgsAt(fvgs, ts, klines15m, options = {}) {
  *   - 陷阱空：high >= c1.high && close < c1.high
  *   - 突破追多：prevClose <= c1.high && close > c1.high
  *   两者不可能同根 K 线同时满足（close 只能在 c1.high 一侧）。
+ *
+ * @param {object} fvgs
+ * @param {number} ts
+ * @param {object} [options]
+ * @param {Set<string>} [options.excludeKeys]  已测试过 / 需要排除的 FVG key 集合（fvgKey 生成）
  */
-function formedFvgsAt(fvgs, ts) {
+function formedFvgsAt(fvgs, ts, options = {}) {
+  const { excludeKeys } = options;
   const C3_CLOSE_OFFSET = 3 * 60 * 60 * 1000; // C3 收盘 = C1 起始 + 3h
   const filterFormed = (arr) =>
     arr
       .filter((f) => f.tsC1 + C3_CLOSE_OFFSET <= ts)
+      .filter((f) => !excludeKeys || !excludeKeys.has(fvgKey(f)))
       .sort((a, b) => b.tsC1 - a.tsC1);
   return {
     bullish: filterFormed(fvgs.bullish),
@@ -370,4 +387,5 @@ module.exports = {
   findFVGs,
   activeFvgsAt,
   formedFvgsAt,
+  fvgKey,
 };
