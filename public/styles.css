@@ -175,57 +175,6 @@ a { color: var(--blue); text-decoration: none; }
 
 .scroll-x { overflow-x: auto; }
 
-/* Splash Screen */
-#splash-screen {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: var(--bg);
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.4s ease-out, visibility 0.4s ease-out;
-}
-#splash-screen.hidden {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-.splash-logo {
-  width: 80px;
-  height: 80px;
-  background: linear-gradient(135deg, #5ea6ff, #6b5cff);
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  font-weight: bold;
-  color: #fff;
-  margin-bottom: 20px;
-  box-shadow: 0 8px 32px rgba(94, 166, 255, 0.4);
-}
-.splash-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: 1px;
-}
-.splash-spinner {
-  margin-top: 30px;
-  width: 24px;
-  height: 24px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: var(--blue);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { 100% { transform: rotate(360deg); } }
-
 /* PWA splash 风格底色 */
 @media (display-mode: standalone) {
   body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
