@@ -15,8 +15,11 @@ const config = {
   // 币安 WebSocket
   binanceWsBase: process.env.BINANCE_WS_BASE || 'wss://fstream.binance.com/ws',
   binanceWsHandshakeMs: num(process.env.BINANCE_WS_HANDSHAKE_MS, 20000),
-  // 实际订阅地址使用 combined stream，参数与需求保持一致
-  binanceWsCombined:
+  // 实际订阅地址：默认使用 combined stream（更稳定）
+  // 单流 `/ws/<name>` 在某些机房会握手成功但不推数据 → 已验证 combined 才是可靠形式
+  // 如需手动覆盖整个 URL，在 .env 设置 BINANCE_WS_URL
+  binanceWsUrl:
+    process.env.BINANCE_WS_URL ||
     'wss://fstream.binance.com/stream?streams=btcusdt@markPrice@1s',
 
   // 交易 Webhook

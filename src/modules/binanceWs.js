@@ -29,8 +29,9 @@ let reconnectDelay = 1000;
 const MAX_DELAY = 30000;
 let running = false;
 
-// 单流形式更稳；combined 形式偶发 GFW 阻断更明显
-const WS_URL = `${config.binanceWsBase.replace(/\/+$/, '')}/btcusdt@markPrice@1s`;
+// 默认 combined stream（已经过实测：单流 /ws/<name> 在某些机房会握手成功但不推数据）
+// 可在 .env 覆盖 BINANCE_WS_URL
+const WS_URL = config.binanceWsUrl;
 
 // === 实时上下文 ===
 const ctx = {
