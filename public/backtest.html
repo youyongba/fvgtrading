@@ -81,6 +81,9 @@
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
+    window.addEventListener('unhandledrejection', (e) => {
+      if (String(e.reason).includes('Failed to fetch')) e.preventDefault();
+    });
   }
 </script>
 </body>

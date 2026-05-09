@@ -76,6 +76,10 @@
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
+    // 防止 SW 静默拒绝向上冒泡（与服务端切换端口/未启动时常见）
+    window.addEventListener('unhandledrejection', (e) => {
+      if (String(e.reason).includes('Failed to fetch')) e.preventDefault();
+    });
   }
 </script>
 </body>

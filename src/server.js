@@ -118,6 +118,32 @@ app.get('/backtest', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'backtest.html'));
 });
 
+// 一键卸载 Service Worker + 清空缓存（切端口/排错时用）
+// 访问 http://your-host:port/reset-sw 即可
+app.get('/reset-sw', (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html><meta charset="utf-8"><title>Reset SW</title>
+<body style="background:#0b1020;color:#e6ecff;font-family:-apple-system,sans-serif;padding:20px">
+<h2>Service Worker 重置工具</h2>
+<pre id="log">running...</pre>
+<script>
+(async () => {
+  const log = document.getElementById('log');
+  const append = (m) => log.textContent += '\\n' + m;
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) { await r.unregister(); append('unregistered: ' + r.scope); }
+  }
+  if (window.caches) {
+    const keys = await caches.keys();
+    for (const k of keys) { await caches.delete(k); append('cache deleted: ' + k); }
+  }
+  append('done. 关闭所有该域名的标签页后重新打开。');
+})();
+</script>
+</body>`);
+});
+
 // ===================== 启动 =====================
 app.listen(config.port, () => {
   logger.ok(`FVG 量化交易系统启动成功`);
