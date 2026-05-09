@@ -61,7 +61,11 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
   pnl REAL,
   pnl_pct REAL,
   exit_reason TEXT,
-  fee REAL
+  fee REAL,
+  stop_loss REAL,
+  take_profit REAL,
+  tp_src TEXT,
+  hold_bars INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS backtest_equity (
@@ -76,5 +80,18 @@ CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts_ms);
 CREATE INDEX IF NOT EXISTS idx_btr_task ON backtest_trades(task_id);
 CREATE INDEX IF NOT EXISTS idx_bte_task ON backtest_equity(task_id);
 `);
+
+// 幂等表迁移：旧版本可能没有这些列，逐个尝试 ALTER（已存在会抛异常忽略即可）
+const ensureColumn = (table, col, type) => {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  } catch (_) {
+    /* 已存在 */
+  }
+};
+ensureColumn('backtest_trades', 'stop_loss', 'REAL');
+ensureColumn('backtest_trades', 'take_profit', 'REAL');
+ensureColumn('backtest_trades', 'tp_src', 'TEXT');
+ensureColumn('backtest_trades', 'hold_bars', 'INTEGER');
 
 module.exports = db;

@@ -203,8 +203,9 @@ async function runBacktest(taskId, opts) {
   const insTrade = db.prepare(
     `INSERT INTO backtest_trades
       (task_id, open_ts, open_ts_cn, close_ts, close_ts_cn,
-       direction, signal, entry, exit, qty, pnl, pnl_pct, exit_reason, fee)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       direction, signal, entry, exit, qty, pnl, pnl_pct, exit_reason, fee,
+       stop_loss, take_profit, tp_src, hold_bars)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   );
   const insEquity = db.prepare(
     `INSERT INTO backtest_equity (task_id, ts, ts_cn, equity) VALUES (?,?,?,?)`
@@ -263,9 +264,13 @@ async function runBacktest(taskId, opts) {
         const pnl = pnlGross - fee;
         equity += pnl;
         risk.closePosition({ pnl, ts });
+        // ★ 修复：close_ts 用本根 K 线"收盘时刻"（ts + 15min），
+        //   与 open_ts（信号那根 K 线收盘时刻）至少差 15min，避免开平仓时间相同
+        const closeTs = ts + 15 * 60 * 1000;
+        const holdBars = i - position.openIndex;
         trades.push({
           open_ts: position.openedAt,
-          close_ts: ts,
+          close_ts: closeTs,
           direction: position.direction,
           signal: position.signal,
           entry: position.entry,
@@ -275,13 +280,17 @@ async function runBacktest(taskId, opts) {
           pnl_pct: grossPct,
           exit_reason: reason,
           fee,
+          stop_loss: position.sl,
+          take_profit: position.tp.price,
+          tp_src: position.tp.src,
+          hold_bars: holdBars,
         });
         insTrade.run(
           taskId,
           position.openedAt,
           formatMs(position.openedAt),
-          ts,
-          formatMs(ts),
+          closeTs,
+          formatMs(closeTs),
           position.direction,
           position.signal,
           position.entry,
@@ -290,7 +299,11 @@ async function runBacktest(taskId, opts) {
           pnl,
           grossPct,
           reason,
-          fee
+          fee,
+          position.sl,
+          position.tp.price,
+          position.tp.src,
+          holdBars
         );
         position = null;
       }
@@ -300,7 +313,7 @@ async function runBacktest(taskId, opts) {
     if (!position) {
       const vwap = dataEngine.vwapAt(vwapArr, ts);
       const atr = dataEngine.atrAt(atrArr, ts);
-      const activeFvgs = dataEngine.activeFvgsAt(fvgs, ts, k1h);
+      const activeFvgs = dataEngine.activeFvgsAt(fvgs, ts, k15);
       const sig = signalScanner.scanSignals({
         k15: bar,
         vwap,
@@ -320,6 +333,7 @@ async function runBacktest(taskId, opts) {
             entry: sig.entry,
             stopLossStruct: sig.stopLossStruct,
             atr,
+            minStopPct: config.minStopLossPct,
           });
           if (tp && Number.isFinite(sl)) {
             risk.openPosition(sig.direction, ts);

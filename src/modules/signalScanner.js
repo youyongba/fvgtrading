@@ -181,15 +181,26 @@ function computeTakeProfit({ direction, entry, vwap, activeFvgs }) {
 }
 
 /**
- * 计算最终止损价：结构止损与 1.5*ATR 中取较近者
+ * 计算最终止损价
+ *  1) 结构止损 vs 1.5×ATR：取较近者（按用户初始需求）
+ *  2) 若最终距离 < minStopPct% × entry，则放宽到 minStopPct
+ *     —— 防止 SMC 紧止损被微小波动直接打掉，可在 .env 设 MIN_STOP_LOSS_PCT=0 关闭
  */
-function computeStopLoss({ direction, entry, stopLossStruct, atr }) {
+function computeStopLoss({ direction, entry, stopLossStruct, atr, minStopPct = 0 }) {
   let sl = stopLossStruct;
   if (atr && Number.isFinite(atr)) {
     const atrCap = atr * 1.5;
     const dist = Math.abs(entry - stopLossStruct);
     if (dist > atrCap) {
       sl = direction === 'long' ? entry - atrCap : entry + atrCap;
+    }
+  }
+  // 最小止损距离保护
+  if (minStopPct > 0) {
+    const minDist = entry * (minStopPct / 100);
+    const curDist = Math.abs(entry - sl);
+    if (curDist < minDist) {
+      sl = direction === 'long' ? entry - minDist : entry + minDist;
     }
   }
   return sl;

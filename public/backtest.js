@@ -117,16 +117,27 @@ async function loadResult(id) {
   // 交易明细（前 200 条）
   $('#tradeTable tbody').innerHTML = (t.trades || [])
     .slice(0, 200)
-    .map((tr) => `<tr>
-      <td>${tr.open_ts_cn}</td>
-      <td>${tr.close_ts_cn}</td>
-      <td>${tr.direction === 'long' ? '做多' : '做空'}</td>
-      <td>${tr.signal || '-'}</td>
-      <td>${fmtNum(tr.entry)}</td>
-      <td>${fmtNum(tr.exit)}</td>
-      <td><span class="badge ${tr.exit_reason === 'tp' ? 'green' : 'red'}">${tr.exit_reason}</span></td>
-      <td class="${tr.pnl >= 0 ? 'pos' : 'neg'}">${fmtNum(tr.pnl)}</td>
-    </tr>`).join('');
+    .map((tr) => {
+      const slDistPct = tr.stop_loss != null && tr.entry
+        ? (Math.abs(tr.stop_loss - tr.entry) / tr.entry * 100).toFixed(3) + '%'
+        : '-';
+      const tpDistPct = tr.take_profit != null && tr.entry
+        ? (Math.abs(tr.take_profit - tr.entry) / tr.entry * 100).toFixed(3) + '%'
+        : '-';
+      return `<tr>
+        <td>${tr.open_ts_cn}</td>
+        <td>${tr.close_ts_cn}</td>
+        <td class="${tr.direction === 'long' ? 'pos' : 'neg'}">${tr.direction === 'long' ? '做多' : '做空'}</td>
+        <td>${tr.signal || '-'}</td>
+        <td>${fmtNum(tr.entry)}</td>
+        <td title="距入场 ${slDistPct}">${tr.stop_loss != null ? fmtNum(tr.stop_loss) : '-'}<br><small style="color:var(--muted)">${slDistPct}</small></td>
+        <td title="距入场 ${tpDistPct}">${tr.take_profit != null ? fmtNum(tr.take_profit) : '-'}<br><small style="color:var(--muted)">${tr.tp_src || '-'} / ${tpDistPct}</small></td>
+        <td>${fmtNum(tr.exit)}</td>
+        <td><span class="badge ${tr.exit_reason === 'tp' ? 'green' : 'red'}">${tr.exit_reason}</span></td>
+        <td>${tr.hold_bars != null ? tr.hold_bars : '-'}</td>
+        <td class="${tr.pnl >= 0 ? 'pos' : 'neg'}">${fmtNum(tr.pnl)}</td>
+      </tr>`;
+    }).join('');
 }
 
 async function startBacktest() {

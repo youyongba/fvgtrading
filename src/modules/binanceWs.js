@@ -98,10 +98,11 @@ function readyStateText(ws) {
  *  - 看跌 FVG：c1High 是关键阻力（陷阱空触发线）；c3High~c1Low 是缺口
  */
 function activeFvgsForDashboard(limit = 5) {
-  const refTs = ctx.k1h.length > 0 ? ctx.k1h[ctx.k1h.length - 1][0] : nowMs();
-  const lastK1h = ctx.k1h[ctx.k1h.length - 1];
-  const refPrice = ctx.lastPrice ?? (lastK1h ? lastK1h[4] : null);
-  const active = dataEngine.activeFvgsAt(ctx.fvgs, refTs, ctx.k1h);
+  // 用最新 15m K 线作为评估锚点（与信号判定粒度一致）
+  const last15m = ctx.k15.length > 0 ? ctx.k15[ctx.k15.length - 1] : null;
+  const refTs = last15m ? last15m[0] : nowMs();
+  const refPrice = ctx.lastPrice ?? (last15m ? last15m[4] : null);
+  const active = dataEngine.activeFvgsAt(ctx.fvgs, refTs, ctx.k15);
 
   const decorate = (f) => {
     const distKey = f.type === 'bull' ? f.c1Low : f.c1High;
@@ -374,7 +375,7 @@ async function refreshOnce() {
       const activeFvgs = dataEngine.activeFvgsAt(
         ctx.fvgs,
         last[0],
-        ctx.k1h
+        ctx.k15
       );
       const sig = signalScanner.scanSignals({
         k15: last,
@@ -398,6 +399,7 @@ async function refreshOnce() {
           entry: sig.entry,
           stopLossStruct: sig.stopLossStruct,
           atr,
+          minStopPct: config.minStopLossPct,
         });
         // 立即开仓
         webhookExecutor.fireTradeWebhook({
