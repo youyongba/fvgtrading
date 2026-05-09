@@ -54,6 +54,33 @@
     </div>
   </div>
 
+  <div class="row cols-2" style="margin-top:12px;">
+    <div class="card">
+      <h3>1H 看涨 FVG（活跃，按距当前价远近）</h3>
+      <div id="fvgRefBull" style="font-size:12px;color:var(--muted);margin-bottom:6px;"></div>
+      <div class="scroll-x">
+        <table class="table" id="fvgBullTable">
+          <thead>
+            <tr><th>C1低（关键）</th><th>缺口区间</th><th>距当前价</th><th>形成时间</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>1H 看跌 FVG（活跃，按距当前价远近）</h3>
+      <div id="fvgRefBear" style="font-size:12px;color:var(--muted);margin-bottom:6px;"></div>
+      <div class="scroll-x">
+        <table class="table" id="fvgBearTable">
+          <thead>
+            <tr><th>C1高（关键）</th><th>缺口区间</th><th>距当前价</th><th>形成时间</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div class="card" style="margin-top:12px; display: none;">
     <h3>WebSocket 事件日志（最近 30 条）</h3>
     <div id="wsEventStats" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>

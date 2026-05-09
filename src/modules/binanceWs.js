@@ -22,7 +22,7 @@ const dataEngine = require('./dataEngine');
 const signalScanner = require('./signalScanner');
 const { liveRisk } = require('./riskManager');
 const webhookExecutor = require('./webhookExecutor');
-const { nowMs, startOfDayCN } = require('../utils/timeUtil');
+const { nowMs, startOfDayCN, formatMs } = require('../utils/timeUtil');
 
 let ws = null;
 let reconnectDelay = 1000;
@@ -92,6 +92,50 @@ function readyStateText(ws) {
   }
 }
 
+/**
+ * 取当前活跃的 FVG（按形成时间倒序），并按"距离当前价远近"排好序
+ *  - 看涨 FVG：c1Low 是关键支撑（陷阱多触发线）；c1High~c3Low 是缺口
+ *  - 看跌 FVG：c1High 是关键阻力（陷阱空触发线）；c3High~c1Low 是缺口
+ */
+function activeFvgsForDashboard(limit = 5) {
+  const refTs = ctx.k1h.length > 0 ? ctx.k1h[ctx.k1h.length - 1][0] : nowMs();
+  const lastK1h = ctx.k1h[ctx.k1h.length - 1];
+  const refPrice = ctx.lastPrice ?? (lastK1h ? lastK1h[4] : null);
+  const active = dataEngine.activeFvgsAt(ctx.fvgs, refTs, ctx.k1h);
+
+  const decorate = (f) => {
+    const distKey = f.type === 'bull' ? f.c1Low : f.c1High;
+    return {
+      type: f.type,
+      tsC1: f.tsC1,
+      tsC1CN: formatMs(f.tsC1),
+      c1Low: f.c1Low,
+      c1High: f.c1High,
+      gapLow: f.gapLow,
+      gapHigh: f.gapHigh,
+      keyPrice: distKey, // 系统判信号的关键 C1 价
+      distance: refPrice ? distKey - refPrice : null,
+      distancePct: refPrice ? (distKey - refPrice) / refPrice : null,
+    };
+  };
+
+  const closer = (refPrice, getKey) => (a, b) =>
+    Math.abs(getKey(a) - refPrice) - Math.abs(getKey(b) - refPrice);
+
+  const bullish = active.bullish.map(decorate);
+  const bearish = active.bearish.map(decorate);
+  if (refPrice != null) {
+    bullish.sort(closer(refPrice, (f) => f.c1Low));
+    bearish.sort(closer(refPrice, (f) => f.c1High));
+  }
+  return {
+    bullish: bullish.slice(0, limit),
+    bearish: bearish.slice(0, limit),
+    refPrice,
+    refTsCN: formatMs(refTs),
+  };
+}
+
 function getStatus() {
   return {
     running,
@@ -113,6 +157,7 @@ function getStatus() {
       ctx.atrArr.length > 0
         ? ctx.atrArr[ctx.atrArr.length - 1].atr
         : null,
+    fvgs: activeFvgsForDashboard(5),
   };
 }
 

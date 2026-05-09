@@ -21,6 +21,43 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+function renderFvgs(fvgs, lastPrice) {
+  if (!fvgs) return;
+  const refLine = (sideLabel) =>
+    `参考价：${fmtPrice(fvgs.refPrice ?? lastPrice)}  ·  数据时间：${fvgs.refTsCN || '-'}  ·  ${sideLabel}`;
+
+  const $bullRef = document.querySelector('#fvgRefBull');
+  const $bearRef = document.querySelector('#fvgRefBear');
+  if ($bullRef) $bullRef.innerText = refLine('C1 最低点 = 陷阱多触发线');
+  if ($bearRef) $bearRef.innerText = refLine('C1 最高点 = 陷阱空触发线');
+
+  const rowHtml = (f, side) => {
+    const distAbs = f.distance == null ? '-' : (f.distance >= 0 ? '+' : '') + Number(f.distance).toFixed(2);
+    const distPct = f.distancePct == null ? '' : ` (${(f.distancePct * 100).toFixed(2)}%)`;
+    const distColor = f.distance == null ? '' : (f.distance >= 0 ? 'pos' : 'neg');
+    const keyColor = side === 'bull' ? 'pos' : 'neg';
+    return `<tr>
+      <td class="${keyColor}" style="font-weight:600">${fmtPrice(f.keyPrice)}</td>
+      <td>${fmtPrice(f.gapLow)} ~ ${fmtPrice(f.gapHigh)}</td>
+      <td class="${distColor}">${distAbs}${distPct}</td>
+      <td style="color:var(--muted);font-size:12px">${f.tsC1CN || '-'}</td>
+    </tr>`;
+  };
+
+  const $bull = document.querySelector('#fvgBullTable tbody');
+  const $bear = document.querySelector('#fvgBearTable tbody');
+  if ($bull) {
+    $bull.innerHTML = (fvgs.bullish || []).length
+      ? fvgs.bullish.map((f) => rowHtml(f, 'bull')).join('')
+      : '<tr><td colspan="4" style="color:var(--muted)">暂无活跃看涨 FVG（启动后等待指标加载）</td></tr>';
+  }
+  if ($bear) {
+    $bear.innerHTML = (fvgs.bearish || []).length
+      ? fvgs.bearish.map((f) => rowHtml(f, 'bear')).join('')
+      : '<tr><td colspan="4" style="color:var(--muted)">暂无活跃看跌 FVG（启动后等待指标加载）</td></tr>';
+  }
+}
+
 async function fetchStatus() {
   const res = await fetch('/api/status').then(r => r.json());
   if (!res.ok) return;
@@ -93,6 +130,9 @@ async function fetchStatus() {
     <div class="kv"><span class="k">VWAP</span><span>${fmtPrice(live.vwapNow)}</span></div>
     <div class="kv"><span class="k">ATR(14)</span><span>${live.atrNow ? Number(live.atrNow).toFixed(2) : '-'}</span></div>
   `;
+
+  // FVG 关键价位
+  renderFvgs(live.fvgs, live.lastPrice);
 
   // 配置
   const cfg = res.config;
