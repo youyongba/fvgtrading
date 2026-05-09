@@ -313,12 +313,15 @@ async function runBacktest(taskId, opts) {
     if (!position) {
       const vwap = dataEngine.vwapAt(vwapArr, ts);
       const atr = dataEngine.atrAt(atrArr, ts);
-      // ★ lookback:1 让信号 K 线本身仍能触发"突破追多/空"（详见 dataEngine 注释）
-      const activeFvgs = dataEngine.activeFvgsAt(fvgs, ts, k15, { lookback: 1 });
+      // ★ 信号扫描必须用 formedFvgsAt（不做 close 失效过滤）
+      //   否则"先突破后反转跌回"的经典陷阱空场景会被 FVG 失效逻辑过滤掉
+      const formedFvgs = dataEngine.formedFvgsAt(fvgs, ts);
+      const prevClose = i > 0 ? k15[i - 1][4] : null;
       const sig = signalScanner.scanSignals({
         k15: bar,
+        prevClose,
         vwap,
-        activeFvgs,
+        activeFvgs: formedFvgs,
       });
       if (sig) {
         const can = risk.canOpen(sig.direction, ts);
@@ -327,7 +330,7 @@ async function runBacktest(taskId, opts) {
             direction: sig.direction,
             entry: sig.entry,
             vwap,
-            activeFvgs,
+            activeFvgs: formedFvgs,
           });
           const sl = signalScanner.computeStopLoss({
             direction: sig.direction,

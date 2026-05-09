@@ -3,76 +3,133 @@
  * --------------------------------------------
  *  背景：1H VWAP 之上 = 多头背景；之下 = 空头背景
  *
- *  做多信号（仅多头背景触发）：
- *    1) 陷阱多   : 价格向下刺穿 1H 看涨 FVG 的 C1 最低点，
- *                 随后 15m 实体收盘"站回"该 C1 最低点上方
- *                 (close > c1Low && low <= c1Low)
- *    2) 支撑多   : 15m 期间最低价向下刺穿 1H VWAP，
- *                 收盘站回 VWAP 上方
- *                 (close > vwap && low <= vwap)
- *    3) 突破追多 : 价格到达 1H 看跌 FVG 附近，
- *                 15m 实体收盘"站上"该看跌 FVG 的 C1 最高点
- *                 (close > c1High && open <= c1High)
+ *  6 种信号触发条件（全部以 15m 实体收盘价为准，影线刺穿不算）：
  *
- *  做空信号（仅空头背景触发）：
- *    4) 陷阱空   : (close < c1High && high >= c1High) 1H 看跌 FVG 的 C1 最高点
- *    5) 阻力空   : (close < vwap && high >= vwap)
- *    6) 突破追空 : (close < c1Low && open >= c1Low) 1H 看涨 FVG 的 C1 最低点
+ *  陷阱信号（反转 / 与 VWAP 背景无关）：
+ *    1) 陷阱多 : 看涨 FVG，low <= c1Low && close > c1Low
+ *               （影线下穿 C1 最低，实体收回上方）
+ *    2) 陷阱空 : 看跌 FVG，high >= c1High && close < c1High
+ *               （影线上穿 C1 最高，实体收回下方）
  *
- *  返回 null 或 { name, direction, entry, stopLossStruct, fvg, vwap }
- *  其中 stopLossStruct 是"结构止损价"，最终止损由 webhookExecutor / backtest 结合 1.5*ATR 限幅。
+ *  VWAP 信号（顺势 / 受 VWAP 背景门控）：
+ *    3) 支撑多 : low <= vwap && close > vwap   （仅多头背景）
+ *    4) 阻力空 : high >= vwap && close < vwap （仅空头背景）
  *
- *  说明：影线刺穿不算 → 全部以 15m K 线"实体收盘价"判定。
+ *  突破信号（顺势 / 受 VWAP 背景门控 / 用 prevClose 判方向）：
+ *    5) 突破追多 : 看跌 FVG，prevClose <= c1High && close > c1High （仅多头背景）
+ *    6) 突破追空 : 看涨 FVG，prevClose >= c1Low && close < c1Low   （仅空头背景）
+ *
+ *  优先级（同根 K 线只取一个信号）：陷阱 > VWAP > 突破
+ *  —— 陷阱信号最稀缺、风报比最好，优先；突破是最次的顺势信号。
+ *
+ *  ★ 关键设计：陷阱信号无视 VWAP 背景
+ *  规范 6.3 写"仅空头背景触发"，但 SMC 实战中"涨到 1H 看跌 FVG C1 高点 + 跌回"
+ *  这种反转陷阱本身就是反转信号，强行用 VWAP 门控会丢失关键信号。所以陷阱多/空
+ *  独立于 VWAP 触发；VWAP/突破信号才走背景门控。
+ *
+ *  ★ 关键设计：突破信号用 prevClose 判方向
+ *  原本 open <= c1High 判定会漏 gap up；改用"上一根 15m close <= c1High"判，
+ *  既覆盖 gap up，也保证不会重复触发（一旦突破上去，prevClose 就 > c1High 了）。
+ *
+ *  ★ FVG 列表来源
+ *  必须用 dataEngine.formedFvgsAt（仅按"已形成"过滤，不做 close 失效）。
+ *  不要用 activeFvgsAt —— 它的失效过滤会把"先突破后反转回踩"的陷阱空 FVG 错误剔除。
+ *
+ *  返回 null 或 { name, direction, entry, stopLossStruct, fvg, vwap, ts, reason }
+ *  最终止损由 computeStopLoss 结合 1.5*ATR / 风险硬上限 / minStopPct 综合得出。
  */
 
 /**
  * @param {object} ctx
- * @param {Array} ctx.k15            当前 15m K 线 [ts, open, high, low, close, vol]
- * @param {number} ctx.vwap          当前 1H VWAP（与 k15 收盘时刻对齐）
- * @param {object} ctx.activeFvgs    { bullish:[], bearish:[] } 在该 K 线时刻仍然活跃的 FVG，按形成时间倒序
- * @returns {null | {name,direction,entry,stopLossStruct,fvg,vwap,reason}}
+ * @param {Array}  ctx.k15        当前 15m K 线 [ts, open, high, low, close, vol]
+ * @param {number} [ctx.prevClose] 上一根 15m K 线收盘价，用于突破信号（gap up/down 也覆盖、防重复）
+ * @param {number} ctx.vwap       当前 1H VWAP（与 k15 收盘时刻对齐）
+ * @param {object} ctx.activeFvgs { bullish:[], bearish:[] } 来自 formedFvgsAt，按形成时间倒序
+ * @returns {null | {name,direction,entry,stopLossStruct,fvg,vwap,ts,reason}}
  */
 function scanSignals(ctx) {
-  const { k15, vwap, activeFvgs } = ctx;
+  const { k15, prevClose = null, vwap, activeFvgs } = ctx;
   if (!k15 || vwap == null) return null;
-  const [ts, open, high, low, close] = k15;
+  const [ts, , high, low, close] = k15;
   const isBull = close > vwap; // 多头背景
   const isBear = close < vwap; // 空头背景
 
-  // ========== 做多分支 ==========
-  if (isBull) {
-    // 1) 陷阱多：刺穿最近的看涨 FVG C1 最低点后收回
-    for (const f of activeFvgs.bullish) {
-      if (low <= f.c1Low && close > f.c1Low) {
-        return signal({
-          name: '陷阱多',
-          direction: 'long',
-          entry: close,
-          stopLossStruct: low, // 假跌破最低点
-          fvg: f,
-          vwap,
-          ts,
-          reason: '15m实体站回1H看涨FVG C1最低点上方',
-        });
-      }
-    }
-    // 2) 支撑多：刺穿 VWAP 后收回
-    if (low <= vwap && close > vwap) {
+  // ============================================================
+  // 优先级 1：陷阱信号（反转 / 无视 VWAP 背景）
+  // ============================================================
+
+  // 1) 陷阱多：看涨 FVG，影线刺穿 C1 最低 + 实体收回上方
+  for (const f of activeFvgs.bullish) {
+    if (low <= f.c1Low && close > f.c1Low) {
       return signal({
-        name: '支撑多',
+        name: '陷阱多',
         direction: 'long',
         entry: close,
-        stopLossStruct: low,
-        fvg: null,
+        stopLossStruct: low, // 假跌破最低点
+        fvg: f,
         vwap,
         ts,
-        reason: '15m实体站回1H VWAP上方',
+        reason: '15m实体站回1H看涨FVG C1最低点上方',
       });
     }
-    // 3) 突破追多：实体站上看跌 FVG 的 C1 最高点
-    //    注意：仅要求 close > c1.high；不强制 open <= c1.high（gap up 也算）
+  }
+
+  // 2) 陷阱空：看跌 FVG，影线刺穿 C1 最高 + 实体跌回下方
+  for (const f of activeFvgs.bearish) {
+    if (high >= f.c1High && close < f.c1High) {
+      return signal({
+        name: '陷阱空',
+        direction: 'short',
+        entry: close,
+        stopLossStruct: high, // 假突破最高点
+        fvg: f,
+        vwap,
+        ts,
+        reason: '15m实体跌回1H看跌FVG C1最高点下方',
+      });
+    }
+  }
+
+  // ============================================================
+  // 优先级 2：VWAP 信号（顺势 / 受 VWAP 背景门控）
+  // ============================================================
+
+  // 3) 支撑多：刺穿 VWAP 后实体收回（仅多头背景）
+  if (isBull && low <= vwap && close > vwap) {
+    return signal({
+      name: '支撑多',
+      direction: 'long',
+      entry: close,
+      stopLossStruct: low,
+      fvg: null,
+      vwap,
+      ts,
+      reason: '15m实体站回1H VWAP上方',
+    });
+  }
+
+  // 4) 阻力空：刺穿 VWAP 后实体跌回（仅空头背景）
+  if (isBear && high >= vwap && close < vwap) {
+    return signal({
+      name: '阻力空',
+      direction: 'short',
+      entry: close,
+      stopLossStruct: high,
+      fvg: null,
+      vwap,
+      ts,
+      reason: '15m实体跌回1H VWAP下方',
+    });
+  }
+
+  // ============================================================
+  // 优先级 3：突破信号（顺势 / VWAP 背景 + prevClose 判突破方向）
+  // ============================================================
+
+  // 5) 突破追多：上一根 close 在 c1.high 下方，当根 close 站上（仅多头背景）
+  if (isBull && prevClose != null) {
     for (const f of activeFvgs.bearish) {
-      if (close > f.c1High) {
+      if (prevClose <= f.c1High && close > f.c1High) {
         return signal({
           name: '突破追多',
           direction: 'long',
@@ -87,40 +144,10 @@ function scanSignals(ctx) {
     }
   }
 
-  // ========== 做空分支 ==========
-  if (isBear) {
-    // 4) 陷阱空
-    for (const f of activeFvgs.bearish) {
-      if (high >= f.c1High && close < f.c1High) {
-        return signal({
-          name: '陷阱空',
-          direction: 'short',
-          entry: close,
-          stopLossStruct: high,
-          fvg: f,
-          vwap,
-          ts,
-          reason: '15m实体跌回1H看跌FVG C1最高点下方',
-        });
-      }
-    }
-    // 5) 阻力空
-    if (high >= vwap && close < vwap) {
-      return signal({
-        name: '阻力空',
-        direction: 'short',
-        entry: close,
-        stopLossStruct: high,
-        fvg: null,
-        vwap,
-        ts,
-        reason: '15m实体跌回1H VWAP下方',
-      });
-    }
-    // 6) 突破追空：实体跌破看涨 FVG 的 C1 最低点
-    //    注意：仅要求 close < c1.low；不强制 open >= c1.low（gap down 也算）
+  // 6) 突破追空：上一根 close 在 c1.low 上方，当根 close 跌穿（仅空头背景）
+  if (isBear && prevClose != null) {
     for (const f of activeFvgs.bullish) {
-      if (close < f.c1Low) {
+      if (prevClose >= f.c1Low && close < f.c1Low) {
         return signal({
           name: '突破追空',
           direction: 'short',
@@ -134,6 +161,7 @@ function scanSignals(ctx) {
       }
     }
   }
+
   return null;
 }
 

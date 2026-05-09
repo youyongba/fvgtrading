@@ -372,18 +372,16 @@ async function refreshOnce() {
     if (!ctx.position) {
       const vwap = dataEngine.vwapAt(ctx.vwapArr, last[0]);
       const atr = dataEngine.atrAt(ctx.atrArr, last[0]);
-      // ★ lookback:1 让信号 K 线本身仍能触发"突破追多/空"
-      //   （否则 close 突破 C1 时 FVG 已被同根 close 判失效，导致信号永远扫不到）
-      const activeFvgs = dataEngine.activeFvgsAt(
-        ctx.fvgs,
-        last[0],
-        ctx.k15,
-        { lookback: 1 }
-      );
+      // ★ 信号扫描必须用 formedFvgsAt（不做 close 失效过滤）
+      //   否则"先突破后反转跌回"的经典陷阱空场景会被 FVG 失效逻辑过滤掉
+      const formedFvgs = dataEngine.formedFvgsAt(ctx.fvgs, last[0]);
+      const prevClose =
+        ctx.k15.length >= 2 ? ctx.k15[ctx.k15.length - 2][4] : null;
       const sig = signalScanner.scanSignals({
         k15: last,
+        prevClose,
         vwap,
-        activeFvgs,
+        activeFvgs: formedFvgs,
       });
       if (sig) {
         const can = liveRisk.canOpen(sig.direction, now);
@@ -395,7 +393,7 @@ async function refreshOnce() {
           direction: sig.direction,
           entry: sig.entry,
           vwap,
-          activeFvgs,
+          activeFvgs: formedFvgs,
         });
         const sl = signalScanner.computeStopLoss({
           direction: sig.direction,

@@ -327,6 +327,37 @@ function activeFvgsAt(fvgs, ts, klines15m, options = {}) {
   };
 }
 
+/**
+ * 取在某 ts 时刻"已形成"的所有 FVG（按形成时间倒序）
+ *
+ * 与 activeFvgsAt 的区别：
+ *   - activeFvgsAt（dashboard 用）：还会基于"当前 close 是否越过 C1 关键点"做失效过滤
+ *   - formedFvgsAt（信号扫描用）：只要 C3 已收盘就保留 → 不会因为价格已经越过 C1 而被过滤掉
+ *
+ * 为什么信号扫描用宽松版？
+ *   SMC 实战中，"先突破上行 → 反转跌回" 是经典的反转陷阱空场景：
+ *   连续几根 K 线 close > c1.high 后，当根 close 跌回 c1.high 下方 → 应触发陷阱空。
+ *   如果用 activeFvgsAt(lookback:1)，"上一根 close > c1.high" 会让 FVG 被判失效，
+ *   导致这个真实的陷阱空信号完全扫不到。所以信号扫描器自己用 K 线行为判定，
+ *   不依赖 active 列表预过滤。
+ *
+ * 触发条件的"自然互斥"由 signalScanner 内部的逻辑保证：
+ *   - 陷阱空：high >= c1.high && close < c1.high
+ *   - 突破追多：prevClose <= c1.high && close > c1.high
+ *   两者不可能同根 K 线同时满足（close 只能在 c1.high 一侧）。
+ */
+function formedFvgsAt(fvgs, ts) {
+  const C3_CLOSE_OFFSET = 3 * 60 * 60 * 1000; // C3 收盘 = C1 起始 + 3h
+  const filterFormed = (arr) =>
+    arr
+      .filter((f) => f.tsC1 + C3_CLOSE_OFFSET <= ts)
+      .sort((a, b) => b.tsC1 - a.tsC1);
+  return {
+    bullish: filterFormed(fvgs.bullish),
+    bearish: filterFormed(fvgs.bearish),
+  };
+}
+
 module.exports = {
   exchange,
   ping,
@@ -338,4 +369,5 @@ module.exports = {
   atrAt,
   findFVGs,
   activeFvgsAt,
+  formedFvgsAt,
 };
