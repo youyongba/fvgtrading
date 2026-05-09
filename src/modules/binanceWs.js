@@ -394,6 +394,7 @@ async function refreshOnce() {
           entry: sig.entry,
           vwap,
           activeFvgs: formedFvgs,
+          minPct: config.takeProfitMinPct,
         });
         const sl = signalScanner.computeStopLoss({
           direction: sig.direction,

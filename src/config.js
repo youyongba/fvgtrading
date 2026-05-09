@@ -47,6 +47,10 @@ const config = {
   // 最小止损距离百分比（防止结构止损过近被微小波动止损）
   // 默认 0.3%；设为 0 则关闭此保护，完全按"结构 vs 1.5*ATR 取较近"
   minStopLossPct: num(process.env.MIN_STOP_LOSS_PCT, 0.3),
+  // 保底止盈距离百分比（规范 6.6 的"入场价 ±0.5%"）
+  // VWAP / FVG C1 必须比此距离更远才能作为止盈候选；否则用此距离兜底，
+  // 防止 VWAP 紧贴入场价导致的"开仓即亏损平仓"。
+  takeProfitMinPct: num(process.env.TAKE_PROFIT_MIN_PCT, 0.5),
 
   // 服务器
   port: num(process.env.PORT, 3000),

@@ -170,44 +170,71 @@ function signal(o) {
 }
 
 /**
- * 计算止盈目标（取最近的目标）
+ * 计算止盈目标
  *
- * 做多止盈：上方最近的 1H 看跌 FVG 的 C1 最高点 / 1H VWAP / 入场价 +0.5%
- * 做空止盈：下方最近的 1H 看涨 FVG 的 C1 最低点 / 1H VWAP / 入场价 -0.5%
- * "最近"指数值上距离入场价最近的目标（取得最近 = 收益最小但触发最快）。
+ * 规范 6.6（实战修正版）：
+ *   做多止盈：上方最近的 1H 看跌 FVG C1 最高点 / 1H VWAP / 入场价 +0.5%
+ *   做空止盈：下方最近的 1H 看涨 FVG C1 最低点 / 1H VWAP / 入场价 -0.5%
+ *
+ * "取最近值"的实战解读：
+ *   - 入场价 ±minPct% 视为"保底止盈距离"——VWAP / FVG C1 必须比这个距离更远，
+ *     才能作为有效止盈候选。否则会出现 VWAP 紧贴 entry（如 0.01% 距离）导致
+ *     "开仓即亏损平仓"（被手续费吃掉利润）。
+ *   - 在所有满足"距离 ≥ minPct%"的候选中取**最近的**（数值上最接近 entry 的），
+ *     保证快速止盈的同时确保最小利润空间。
+ *   - 如果没有任何 VWAP / FVG 满足"距离 ≥ minPct%"，则使用 entry ±minPct% 兜底。
+ *
+ * 例：做空 entry=80614, VWAP=80604（0.012%）, 看涨FVG c1.low=80350（0.327%）
+ *   - minPct=0.5%: VWAP 和 FVG 都被排除 → 用 entry-0.5%=80307 作为止盈
+ *   - minPct=0.1%: 候选 [VWAP 80604, FVG 80350, entry-0.5% 80307]
+ *                  做空取最大（最近）= VWAP 80604——但实战中已被 minPct 过滤掉
+ *
+ * @param {object} p
+ * @param {'long'|'short'} p.direction
+ * @param {number} p.entry           入场价
+ * @param {number} p.vwap            1H VWAP
+ * @param {object} p.activeFvgs      { bullish, bearish }
+ * @param {number} [p.minPct=0.5]    保底止盈距离百分比（规范 6.6 默认 0.5%）
  */
-function computeTakeProfit({ direction, entry, vwap, activeFvgs }) {
-  const candidates = [];
+function computeTakeProfit({ direction, entry, vwap, activeFvgs, minPct = 0.5 }) {
+  const dist = minPct / 100;
   if (direction === 'long') {
-    // 入场价 +0.5%
-    candidates.push({ src: 'entry+0.5%', price: entry * 1.005 });
-    if (vwap != null && vwap > entry) {
+    const minTp = entry * (1 + dist);
+    const candidates = [];
+    if (vwap != null && vwap >= minTp) {
       candidates.push({ src: '1H_VWAP', price: vwap });
     }
-    // 上方最近的看跌 FVG C1 最高点
-    const above = activeFvgs.bearish
+    const aboveFar = activeFvgs.bearish
       .map((f) => f.c1High)
-      .filter((p) => p > entry)
+      .filter((p) => p >= minTp)
       .sort((a, b) => a - b);
-    if (above.length) {
-      candidates.push({ src: '看跌FVG_C1_high', price: above[0] });
+    if (aboveFar.length) {
+      candidates.push({ src: '看跌FVG_C1_high', price: aboveFar[0] });
+    }
+    if (candidates.length === 0) {
+      return { src: `entry+${minPct}%`, price: minTp };
     }
     candidates.sort((a, b) => a.price - b.price); // 取最近（最小）
+    return candidates[0];
   } else {
-    candidates.push({ src: 'entry-0.5%', price: entry * 0.995 });
-    if (vwap != null && vwap < entry) {
+    const minTp = entry * (1 - dist);
+    const candidates = [];
+    if (vwap != null && vwap <= minTp) {
       candidates.push({ src: '1H_VWAP', price: vwap });
     }
-    const below = activeFvgs.bullish
+    const belowFar = activeFvgs.bullish
       .map((f) => f.c1Low)
-      .filter((p) => p < entry)
+      .filter((p) => p <= minTp)
       .sort((a, b) => b - a);
-    if (below.length) {
-      candidates.push({ src: '看涨FVG_C1_low', price: below[0] });
+    if (belowFar.length) {
+      candidates.push({ src: '看涨FVG_C1_low', price: belowFar[0] });
+    }
+    if (candidates.length === 0) {
+      return { src: `entry-${minPct}%`, price: minTp };
     }
     candidates.sort((a, b) => b.price - a.price); // 取最近（最大）
+    return candidates[0];
   }
-  return candidates[0] || null;
 }
 
 /**

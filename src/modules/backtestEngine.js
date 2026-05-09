@@ -331,6 +331,7 @@ async function runBacktest(taskId, opts) {
             entry: sig.entry,
             vwap,
             activeFvgs: formedFvgs,
+            minPct: config.takeProfitMinPct,
           });
           const sl = signalScanner.computeStopLoss({
             direction: sig.direction,
