@@ -36,10 +36,11 @@ async function loadTasks() {
           wr = fmtPct(r.winRate);
         } catch (_) { /* ignore */ }
       }
-      return `<tr>
+      const errAttr = t.error ? ` title="${String(t.error).replace(/"/g, '&quot;')}"` : '';
+      return `<tr${errAttr}>
         <td><code>${t.id.slice(0, 8)}</code></td>
         <td>${t.start_date} → ${t.end_date}</td>
-        <td><span class="badge ${t.status === 'done' ? 'green' : t.status === 'error' ? 'red' : 'yellow'}">${t.status}</span></td>
+        <td><span class="badge ${t.status === 'done' ? 'green' : t.status === 'error' ? 'red' : 'yellow'}">${t.status}</span>${t.error ? `<div style="color:var(--red);font-size:11px;margin-top:4px">${t.error}</div>` : ''}</td>
         <td>${Math.round(t.progress)}%</td>
         <td>${pnl}</td>
         <td>${wr}</td>
@@ -156,7 +157,16 @@ function pollTask(id) {
   pollTimer = setInterval(async () => {
     const r = await fetch(`/api/backtest/status/${id}`).then((r) => r.json());
     if (!r.ok) return;
-    $('#taskHint').textContent = `任务 ${id.slice(0, 8)} · ${r.status} · ${Math.round(r.progress)}%`;
+    if (r.status === 'error') {
+      $('#taskHint').className = 'badge red';
+      $('#taskHint').textContent = `任务 ${id.slice(0, 8)} 失败：${r.error || '未知错误'}`;
+    } else if (r.status === 'done') {
+      $('#taskHint').className = 'badge green';
+      $('#taskHint').textContent = `任务 ${id.slice(0, 8)} 完成`;
+    } else {
+      $('#taskHint').className = 'badge yellow';
+      $('#taskHint').textContent = `任务 ${id.slice(0, 8)} · ${r.status} · ${Math.round(r.progress)}%`;
+    }
     if (r.status === 'done' || r.status === 'error') {
       clearInterval(pollTimer);
       loadTasks();

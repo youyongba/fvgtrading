@@ -18,21 +18,75 @@
  */
 const ccxt = require('ccxt');
 const { startOfDayCN } = require('../utils/timeUtil');
-
-const exchange = new ccxt.binanceusdm({
-  enableRateLimit: true,
-  options: { defaultType: 'future' },
-});
+const config = require('../config');
+const logger = require('../utils/logger');
 
 /**
- * 拉取 K 线
- * @param {string} symbol  例如 'BTC/USDT:USDT'
- * @param {string} timeframe  '15m' | '1h'
- * @param {number} since   起始 ms
- * @param {number} limit   每批最多 1500
+ * ccxt 实例
+ *  - timeout: 60s（默认 10s 在国内网络不够用）
+ *  - httpsProxy / httpProxy: 来自 .env，若不为空 ccxt 会自动走代理
+ *  - enableRateLimit: 内置限速
+ */
+const exchange = new ccxt.binanceusdm({
+  enableRateLimit: true,
+  timeout: config.ccxtTimeoutMs,
+  options: { defaultType: 'future' },
+});
+if (config.httpsProxy) exchange.httpsProxy = config.httpsProxy;
+if (config.httpProxy) exchange.httpProxy = config.httpProxy;
+
+/**
+ * 通用重试包装：对 ccxt 网络/超时错误指数退避重试
+ */
+async function withRetry(fn, label, maxRetries = 3) {
+  let attempt = 0;
+  let lastErr;
+  while (attempt <= maxRetries) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const retriable =
+        e instanceof ccxt.NetworkError ||
+        e instanceof ccxt.RequestTimeout ||
+        e instanceof ccxt.DDoSProtection ||
+        /timed out|ECONNRESET|ETIMEDOUT|ENETUNREACH|EAI_AGAIN/i.test(
+          e.message || ''
+        );
+      if (!retriable || attempt === maxRetries) break;
+      const delay = Math.min(2000 * Math.pow(2, attempt), 15000);
+      logger.warn(
+        `${label} 失败(${attempt + 1}/${maxRetries})，${delay}ms 后重试: ${e.message}`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+      attempt += 1;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * 拉取 K 线（带重试）
  */
 async function fetchOHLCV(symbol, timeframe, since, limit = 1500) {
-  return exchange.fetchOHLCV(symbol, timeframe, since, limit);
+  return withRetry(
+    () => exchange.fetchOHLCV(symbol, timeframe, since, limit),
+    `fetchOHLCV ${timeframe}`
+  );
+}
+
+/**
+ * 简单连通性预检（用于回测启动前快速失败）
+ *  - 临时使用 10s 超时；不重试，立即返回结果
+ */
+async function ping() {
+  const original = exchange.timeout;
+  exchange.timeout = 10000;
+  try {
+    return await exchange.fetchTime();
+  } finally {
+    exchange.timeout = original;
+  }
 }
 
 /**
@@ -238,6 +292,7 @@ function activeFvgsAt(fvgs, ts, klines1h) {
 
 module.exports = {
   exchange,
+  ping,
   fetchOHLCV,
   fetchOHLCVRange,
   computeVWAP,

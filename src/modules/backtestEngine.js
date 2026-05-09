@@ -118,6 +118,23 @@ function startBacktest(opts) {
 
 async function runBacktest(taskId, opts) {
   const t0 = Date.now();
+
+  // 启动前预检（快速失败）
+  try {
+    await dataEngine.ping();
+  } catch (e) {
+    db.prepare(
+      `UPDATE backtest_tasks SET status='error', error=?, updated_at=? WHERE id=?`
+    ).run(
+      `无法连接币安: ${e.message}（请检查网络或在 .env 配置 HTTPS_PROXY）`,
+      formatNow(),
+      taskId
+    );
+    tasks.set(taskId, { status: 'error', progress: 0 });
+    logger.error(`回测预检失败 ${taskId}: ${e.message}`);
+    return;
+  }
+
   const setStatus = (status, extra = {}) => {
     const fields = ['status', 'updated_at'];
     const values = [status, formatNow()];

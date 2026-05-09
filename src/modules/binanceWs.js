@@ -169,13 +169,16 @@ function onPriceTick(price) {
  *  - 在 15m K 线"刚收盘"时调用 signalScanner
  */
 async function refreshIndicatorsLoop() {
+  let backoff = 60_000;
   while (running) {
     try {
       await refreshOnce();
+      backoff = 60_000; // 成功后回到 1 分钟节奏
     } catch (e) {
-      logger.error('indicators refresh error:', e.message);
+      logger.error(`指标刷新失败（${backoff}ms 后重试）: ${e.message}`);
+      backoff = Math.min(backoff * 2, 5 * 60_000); // 最长 5 分钟
     }
-    await sleep(60_000); // 每分钟刷新
+    await sleep(backoff);
   }
 }
 
@@ -265,7 +268,11 @@ function start() {
   ctx.stats.startedDay = startOfDayCN(nowMs());
   liveRisk.reset();
   refreshOnce()
-    .catch((e) => logger.error('initial refresh:', e.message))
+    .catch((e) =>
+      logger.error(
+        `初始指标刷新失败（不影响 WS 接入，将在后台持续重试）: ${e.message}`
+      )
+    )
     .finally(() => {
       connect();
       refreshIndicatorsLoop();

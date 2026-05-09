@@ -51,6 +51,18 @@ const config = {
   // 交易标的
   symbol: 'BTCUSDT',
   ccxtSymbol: 'BTC/USDT:USDT', // ccxt 永续合约符号
+
+  // 网络
+  ccxtTimeoutMs: num(process.env.CCXT_TIMEOUT_MS, 60000),
+  // 代理：如 http://127.0.0.1:7890
+  // 国内网络访问 fapi.binance.com 不稳时，可在 .env 中配置
+  httpsProxy:
+    process.env.HTTPS_PROXY ||
+    process.env.https_proxy ||
+    process.env.HTTP_PROXY ||
+    process.env.http_proxy ||
+    '',
+  httpProxy: process.env.HTTP_PROXY || process.env.http_proxy || '',
 };
 
 module.exports = config;
